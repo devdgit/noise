@@ -1,4 +1,4 @@
-package recvwindow
+package network
 
 import (
 	"math/rand"
@@ -28,18 +28,20 @@ func TestRecvWindowBasic(t *testing.T) {
 
 		// insert items
 		for j := 0; j < batchSize; j++ {
+			if rand.Intn(10) > 7 {
+				continue
+			}
 			entry := &Entry{
 				idx: j + i*batchSize,
-				val: rand.Uint64(),
+				val: uint64(rand.Intn(batchSize-1) + 1),
 			}
 			expected = append(expected, entry)
-			assert.Equalf(t, nil, rw.Insert(entry), "should not error for entry %d", j+i*batchSize)
+			assert.Equalf(t, nil, rw.Input(uint64(entry.idx+1), entry), "should not error for entry %d", j+i*batchSize)
 		}
 
 		// get them out and check them
-		ready := rw.PopWindow()
-		assert.Equal(t, batchSize, len(expected))
-		assert.Equal(t, batchSize, len(ready))
+		ready := rw.Update()
+		assert.Equal(t, len(ready), len(expected))
 		for j, val := range expected {
 			entry, ok := ready[j].(*Entry)
 			assert.Equal(t, true, ok, "should match entry %d", j)
@@ -71,14 +73,14 @@ func TestRecvWindowConcurrency(t *testing.T) {
 			}
 
 			expected.Store(entry.idx, entry)
-			assert.Equalf(t, nil, rw.Insert(entry), "should not error for entry %d", j+i*batchSize)
+			assert.Equalf(t, nil, rw.Input(uint64(entry.idx+1), entry), "should not error for entry %d", j+i*batchSize)
 		}
 		glog.Infof("Inserted %d items\n", batchSize)
 
 		go func() {
 			defer wg.Done()
 			// get them out and check them
-			window := rw.PopWindow()
+			window := rw.Update()
 			glog.Infof("Window had %d items\n", len(window))
 			for j, val := range window {
 				entry, ok := val.(*Entry)
@@ -98,7 +100,7 @@ func TestRecvWindowConcurrency(t *testing.T) {
 	wg.Wait()
 
 	// make sure nothing is left
-	assert.Equal(t, 0, len(rw.PopWindow()))
+	assert.Equal(t, 0, len(rw.Update()))
 }
 
 func TestRecvWindowLimit(t *testing.T) {
@@ -108,7 +110,7 @@ func TestRecvWindowLimit(t *testing.T) {
 	rw := NewRecvWindow(rwSize)
 
 	for i := 0; i < rwSize; i++ {
-		assert.Equalf(t, nil, rw.Insert(&Entry{}), "should not error for entry %d", i)
+		assert.Equalf(t, nil, rw.Input(uint64(i+1), &Entry{}), "should not error for entry %d", i)
 	}
-	assert.NotEqualf(t, nil, rw.Insert(&Entry{}), "should fail after the limit")
+	assert.NotEqualf(t, nil, rw.Input(uint64(rwSize+1), &Entry{}), "should fail after the limit")
 }
